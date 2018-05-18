@@ -22,12 +22,17 @@
 
 #define kLogglyBaseUrl      @"https://logs-01.loggly.com/inputs/%@"
 #define kLogglyTagsUrl      @"%@/tag/%@"
+#define kMaxRetries         10
+#define kRetryInterval      5 //seconds
 
 @interface JMLogglyClient ()
+
+@property (nonatomic, strong) NSURLSessionConfiguration *sessionConfiguration;
 
 - (NSError *)errorWithMessage:(NSString *)errorMessage;
 - (NSURL *)urlWithTags:(NSArray *)tags;
 - (void)logRequest:(NSMutableURLRequest *)request withCompletion:(JMCompletion)completion;
+- (void)logRequest:(NSMutableURLRequest *)request withCompletion:(JMCompletion)completion andRetryCount:(NSUInteger)retryCount;
 
 @end
 
@@ -51,6 +56,10 @@
 {
     self = [super init];
     if (self) {
+        NSURLSessionConfiguration *config = [NSURLSessionConfiguration defaultSessionConfiguration];
+        [config setURLCache:nil];
+        [config setRequestCachePolicy:NSURLRequestReloadIgnoringLocalAndRemoteCacheData];
+        [self setSessionConfiguration:config];
     }
     return self;
 }
@@ -82,10 +91,36 @@
 
 - (void)logRequest:(NSMutableURLRequest *)request withCompletion:(JMCompletion)completion
 {
-    NSURLSession *session = [NSURLSession sessionWithConfiguration:[NSURLSessionConfiguration defaultSessionConfiguration]];
+    //log in background
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
+        [self logRequest:request withCompletion:completion andRetryCount:0];
+    });
+}
+
+- (void)logRequest:(NSMutableURLRequest *)request withCompletion:(JMCompletion)completion andRetryCount:(NSUInteger)retryCount
+{
+    NSURLSession *session = [NSURLSession sessionWithConfiguration:self.sessionConfiguration];
     [[session dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+
+        //return if it's a good response
+        NSUInteger responseStatusCode = [(NSHTTPURLResponse*)response statusCode];
+        if (responseStatusCode == 200) {
+            if (completion) completion(data, nil);
+            return;
+        }
         
-        if (completion) completion(data, error);
+        //return if max retries hit
+        if (retryCount >= kMaxRetries) {
+            if (completion) completion (nil, error);
+            return;
+        }
+        
+        //retry with exponential backoff
+        double delayInSeconds = kRetryInterval * pow(2, retryCount);
+        dispatch_time_t popTime = dispatch_time(DISPATCH_TIME_NOW, delayInSeconds * NSEC_PER_SEC);
+        dispatch_after(popTime, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^(void){
+            [self logRequest:request withCompletion:completion andRetryCount:retryCount+1];
+        });
         
     }] resume];
 }
