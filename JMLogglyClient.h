@@ -21,6 +21,20 @@
 
 #import <Foundation/Foundation.h>
 
+typedef void (^JMCompletion)(id result, NSError *error);
+
 @interface JMLogglyClient : NSObject
+
++ (JMLogglyClient *)sharedClient;
+
+@property (nonatomic, strong) NSArray * tags;
+@property (nonatomic, strong) NSString * token;
+
+- (void)logMessage:(NSString *)message;
+- (void)logMessage:(NSString *)message andTags:(NSArray *)tags;
+- (void)logMessage:(NSString *)message andTags:(NSArray *)tags withCompletion:(JMCompletion)completion;
+- (void)logDictionary:(NSDictionary *)dict;
+- (void)logDictionary:(NSDictionary *)dict andTags:(NSArray *)tags;
+- (void)logDictionary:(NSDictionary *)dict andTags:(NSArray *)tags withCompletion:(JMCompletion)completion;
 
 @end
